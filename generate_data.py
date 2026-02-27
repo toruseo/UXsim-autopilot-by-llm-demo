@@ -1,10 +1,11 @@
 """
 Generate synthetic traffic data using UXsim.
 
-Creates a set of parallel corridor networks, each with a capacity
-bottleneck that naturally produces sustained congestion upstream.
-This design concentrates traffic flow (no alternative routes) so that
-a large fraction of recorded travel times reflect congested conditions.
+Creates an interconnected corridor network: parallel corridors with
+capacity bottlenecks, linked by lateral cross-connections that allow
+vehicles to reroute between adjacent corridors.  This produces
+realistic congestion interactions — queuing on one corridor spills
+over to neighbours via route choice.
 """
 
 import os
@@ -25,6 +26,9 @@ LINK_LENGTH = 300                # metres
 FREE_FLOW_SPEED = 50 / 3.6      # km/h -> m/s  (~13.9 m/s)
 JAM_DENSITY = 0.2                # veh/m  (normal links)
 BOTTLENECK_JAM_DENSITY = 0.05    # veh/m  (bottleneck links — 25% capacity)
+CROSS_LINK_POSITIONS = [2, 4, 6] # node positions where corridors connect
+CROSS_LINK_LENGTH = 300          # metres  (lateral links)
+CROSS_DEMAND_FRACTION = 0.3      # fraction of base rate for cross-corridor OD
 SIM_DURATION = 3600              # seconds (1 hour)
 DEMAND_INTERVAL = 300            # seconds – resolution for demand slicing
 DEMAND_SCALE_MIN = 1.5           # minimum demand scale across scenarios
@@ -37,12 +41,17 @@ random.seed(RANDOM_SEED)
 
 
 def build_network(W):
-    """Create parallel corridor networks with bottleneck links.
+    """Create interconnected corridor network with bottleneck links.
 
-    Each corridor is a linear sequence of nodes connected by
-    one-directional links.  One link per corridor has reduced
-    capacity (bottleneck) placed near the downstream end so that
+    The base structure is parallel corridors, each a linear sequence of
+    nodes connected by one-directional links.  One link per corridor has
+    reduced capacity (bottleneck) placed near the downstream end so that
     queues build upstream through most of the corridor.
+
+    Lateral cross-links connect adjacent corridors at several positions,
+    enabling vehicles to reroute between corridors.  When one corridor is
+    congested, traffic can spill over to neighbours, creating realistic
+    inter-corridor interactions.
 
     Returns
     -------
@@ -73,16 +82,34 @@ def build_network(W):
                       free_flow_speed=FREE_FLOW_SPEED,
                       jam_density=jd)
 
+    # Lateral cross-links between adjacent corridors
+    for c in range(NUM_CORRIDORS - 1):
+        for p in CROSS_LINK_POSITIONS:
+            W.addLink(f"X{c}to{c+1}_{p}",
+                      nodes[(c, p)], nodes[(c + 1, p)],
+                      length=CROSS_LINK_LENGTH,
+                      free_flow_speed=FREE_FLOW_SPEED,
+                      jam_density=JAM_DENSITY)
+            W.addLink(f"X{c+1}to{c}_{p}",
+                      nodes[(c + 1, p)], nodes[(c, p)],
+                      length=CROSS_LINK_LENGTH,
+                      free_flow_speed=FREE_FLOW_SPEED,
+                      jam_density=JAM_DENSITY)
+
     return nodes, btl_positions
 
 
 def add_demand(W, nodes, demand_scale):
-    """Add sustained demand along each corridor.
+    """Add sustained demand along each corridor and between adjacent corridors.
 
     A trapezoidal time profile provides a short ramp-up, a long
     plateau of high demand (exceeding bottleneck capacity), and a
     brief wind-down.  This keeps links upstream of the bottleneck
     congested for most of the simulation.
+
+    Cross-corridor demand is added between adjacent corridors so that
+    vehicles actually use the lateral cross-links, creating traffic
+    interactions between corridors.
     """
     for c in range(NUM_CORRIDORS):
         base_rate = demand_scale * np.random.uniform(0.15, 0.35)
@@ -103,6 +130,29 @@ def add_demand(W, nodes, demand_scale):
                         t_start,
                         min(t_start + DEMAND_INTERVAL, SIM_DURATION),
                         flow=rate)
+
+    # Cross-corridor demand between adjacent corridors
+    for c in range(NUM_CORRIDORS - 1):
+        cross_rate = demand_scale * np.random.uniform(0.05, 0.15)
+        for t_start in range(0, SIM_DURATION, DEMAND_INTERVAL):
+            t_mid = t_start + DEMAND_INTERVAL / 2
+            if t_mid < SIM_DURATION * 0.1:
+                time_factor = t_mid / (SIM_DURATION * 0.1)
+            elif t_mid < SIM_DURATION * 0.85:
+                time_factor = 1.0
+            else:
+                time_factor = max(0.05, 1.0 - (t_mid - SIM_DURATION * 0.85)
+                                  / (SIM_DURATION * 0.15))
+            rate = cross_rate * time_factor * np.random.uniform(0.8, 1.2)
+            t_end = min(t_start + DEMAND_INTERVAL, SIM_DURATION)
+            # Demand from corridor c origin to corridor c+1 destination
+            W.adddemand(nodes[(c, 0)],
+                        nodes[(c + 1, NODES_PER_CORRIDOR - 1)],
+                        t_start, t_end, flow=rate * CROSS_DEMAND_FRACTION)
+            # Demand from corridor c+1 origin to corridor c destination
+            W.adddemand(nodes[(c + 1, 0)],
+                        nodes[(c, NODES_PER_CORRIDOR - 1)],
+                        t_start, t_end, flow=rate * CROSS_DEMAND_FRACTION)
 
 
 def run_scenario(scenario_id, demand_scale):

@@ -1,7 +1,7 @@
 """
 Generate traffic simulation visualizations using UXsim's built-in features.
 
-Runs one representative scenario from the corridor-with-bottleneck network
+Runs one representative scenario from the interconnected corridor network
 and produces:
   - Network state animation (GIF)
   - Network state snapshots at key time points (before / during / after congestion)
@@ -30,6 +30,9 @@ LINK_LENGTH = 300                # metres
 FREE_FLOW_SPEED = 50 / 3.6      # km/h -> m/s
 JAM_DENSITY = 0.2                # veh/m  (normal links)
 BOTTLENECK_JAM_DENSITY = 0.05    # veh/m  (bottleneck links)
+CROSS_LINK_POSITIONS = [2, 4, 6] # node positions where corridors connect
+CROSS_LINK_LENGTH = 300          # metres  (lateral links)
+CROSS_DEMAND_FRACTION = 0.3      # fraction of base rate for cross-corridor OD
 SIM_DURATION = 3600              # seconds (1 hour)
 DEMAND_INTERVAL = 300            # seconds
 DEMAND_SCALE = 2.5               # representative mid-range demand
@@ -40,7 +43,7 @@ random.seed(RANDOM_SEED)
 
 
 def build_network(W):
-    """Create parallel corridor networks with bottleneck links."""
+    """Create interconnected corridor network with bottleneck links."""
     nodes = {}
     for c in range(NUM_CORRIDORS):
         for p in range(NODES_PER_CORRIDOR):
@@ -65,11 +68,25 @@ def build_network(W):
             corridor_links.append(link)
         links_by_corridor[c] = corridor_links
 
+    # Lateral cross-links between adjacent corridors
+    for c in range(NUM_CORRIDORS - 1):
+        for p in CROSS_LINK_POSITIONS:
+            W.addLink(f"X{c}to{c+1}_{p}",
+                      nodes[(c, p)], nodes[(c + 1, p)],
+                      length=CROSS_LINK_LENGTH,
+                      free_flow_speed=FREE_FLOW_SPEED,
+                      jam_density=JAM_DENSITY)
+            W.addLink(f"X{c+1}to{c}_{p}",
+                      nodes[(c + 1, p)], nodes[(c, p)],
+                      length=CROSS_LINK_LENGTH,
+                      free_flow_speed=FREE_FLOW_SPEED,
+                      jam_density=JAM_DENSITY)
+
     return nodes, btl_positions, links_by_corridor
 
 
 def add_demand(W, nodes, demand_scale):
-    """Add sustained demand along each corridor with trapezoidal profile."""
+    """Add sustained demand along each corridor and between adjacent corridors."""
     for c in range(NUM_CORRIDORS):
         base_rate = demand_scale * np.random.uniform(0.15, 0.35)
         for t_start in range(0, SIM_DURATION, DEMAND_INTERVAL):
@@ -87,6 +104,27 @@ def add_demand(W, nodes, demand_scale):
                         t_start,
                         min(t_start + DEMAND_INTERVAL, SIM_DURATION),
                         flow=rate)
+
+    # Cross-corridor demand between adjacent corridors
+    for c in range(NUM_CORRIDORS - 1):
+        cross_rate = demand_scale * np.random.uniform(0.05, 0.15)
+        for t_start in range(0, SIM_DURATION, DEMAND_INTERVAL):
+            t_mid = t_start + DEMAND_INTERVAL / 2
+            if t_mid < SIM_DURATION * 0.1:
+                time_factor = t_mid / (SIM_DURATION * 0.1)
+            elif t_mid < SIM_DURATION * 0.85:
+                time_factor = 1.0
+            else:
+                time_factor = max(0.05, 1.0 - (t_mid - SIM_DURATION * 0.85)
+                                  / (SIM_DURATION * 0.15))
+            rate = cross_rate * time_factor * np.random.uniform(0.8, 1.2)
+            t_end = min(t_start + DEMAND_INTERVAL, SIM_DURATION)
+            W.adddemand(nodes[(c, 0)],
+                        nodes[(c + 1, NODES_PER_CORRIDOR - 1)],
+                        t_start, t_end, flow=rate * CROSS_DEMAND_FRACTION)
+            W.adddemand(nodes[(c + 1, 0)],
+                        nodes[(c, NODES_PER_CORRIDOR - 1)],
+                        t_start, t_end, flow=rate * CROSS_DEMAND_FRACTION)
 
 
 def copy_uxsim_output(sim_output_dir, dest_dir, src_name, dest_name):

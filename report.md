@@ -75,27 +75,29 @@ The final hidden state $\mathbf{h}_L$ is passed through a dense layer to produce
 
 ### 3.1 Network Topology
 
-The previous grid-based approach produced too much free-flow data (~72%) because the grid provides many alternative routes, spreading traffic thinly across peripheral links.
-
-To address this, we adopt a **corridor-with-bottleneck** design: 10 parallel one-directional corridors, each containing a capacity bottleneck that forces queuing upstream.
+We adopt an **interconnected corridor network**: 10 parallel one-directional corridors, each containing a capacity bottleneck, linked by **bidirectional lateral cross-connections** at three intermediate positions.  This design creates realistic inter-corridor interactions — when one corridor is congested, vehicles can reroute to adjacent corridors, and congestion spills over between neighbours.
 
 | Parameter | Value |
 |---|---|
 | Corridors | 10 parallel one-directional corridors |
 | Nodes per corridor | 8 (7 links each) |
-| Total links | 70 |
-| Link length | 300 m |
+| Corridor links | 70 |
+| Cross-link positions | Nodes 2, 4, 6 (bidirectional between adjacent corridors) |
+| Cross-links | 54 (9 pairs × 3 positions × 2 directions) |
+| Total links | 124 |
+| Link length | 300 m (corridor and cross-links) |
 | Free-flow speed | 50 km/h (13.9 m/s) |
 | Normal jam density | 0.2 veh/m |
 | Bottleneck jam density | 0.05 veh/m (25% of normal capacity) |
 | Free-flow travel time | 21.6 s per link |
 
-Each corridor has **one bottleneck link** placed near the downstream end (positions 4–6, randomised per corridor).  Because traffic has no alternative route around the bottleneck, sustained demand above the bottleneck capacity creates queues that propagate upstream through most of the corridor.
+Each corridor has **one bottleneck link** placed near the downstream end (positions 4–6, randomised per corridor).  The lateral cross-links at positions 2, 4, and 6 allow vehicles to detour through adjacent corridors to avoid bottlenecks.  This creates **route choice** and **congestion spillover**: when a corridor's bottleneck becomes heavily congested, diverted traffic increases load on neighbouring corridors, producing complex inter-corridor congestion dynamics.
 
 ### 3.2 Demand Generation
 
 - **30 simulation scenarios** are run, each with a different `demand_scale` sampled uniformly from [1.5, 3.0].
 - Each corridor receives one-directional demand from its origin to its destination node.
+- **Cross-corridor demand** is added between adjacent corridors (origin of corridor $c$ to destination of corridor $c\pm1$) at approximately 30% of the cross-corridor base rate, ensuring that vehicles actively use the lateral connections.
 - A **trapezoidal demand profile** (ramp-up 0–10%, plateau 10–85%, wind-down 85–100%) maintains high demand for most of the simulation, ensuring sustained congestion rather than a brief peak.
 - Base flow rates are randomised per corridor within [0.15, 0.35] veh/s (scaled by `demand_scale`).
 - The simulation uses a platoon size (`deltan`) of 5 vehicles and runs for **3600 seconds (1 hour)**.
@@ -108,7 +110,7 @@ The following visualisations (produced by UXsim's built-in analysis tools on a r
 
 ![Network state animation](results/network_animation.gif)
 
-The animated GIF shows the evolution of traffic density and speed across all 10 corridors over the full 1-hour simulation.  Link colour indicates speed (yellow = free-flow, dark blue/purple = congested) and link width indicates density.  Congestion builds upstream of each corridor's bottleneck during the demand plateau and gradually dissipates after demand drops.
+The animated GIF shows the evolution of traffic density and speed across all 10 interconnected corridors over the full 1-hour simulation.  Link colour indicates speed (yellow = free-flow, dark blue/purple = congested) and link width indicates density.  The vertical cross-links between corridors are visible, carrying traffic between adjacent corridors.  Congestion builds upstream of each corridor's bottleneck and spills over to neighbouring corridors via the cross-links.
 
 #### Network Snapshots
 
@@ -116,7 +118,7 @@ The animated GIF shows the evolution of traffic density and speed across all 10 
 |:---:|:---:|:---:|
 | ![Early](results/network_snapshot_early.png) | ![Peak](results/network_snapshot_peak.png) | ![Late](results/network_snapshot_late.png) |
 
-Three snapshots at key moments: (left) early in the simulation when demand is still ramping up and most links are in free-flow; (centre) mid-simulation when sustained high demand has created long queues upstream of every bottleneck; (right) late in the simulation as demand winds down and queues begin to dissipate.
+Three snapshots at key moments: (left) early in the simulation when demand is still ramping up and most links are in free-flow; (centre) mid-simulation when sustained high demand has created long queues upstream of bottlenecks, with spillover visible on cross-links; (right) late in the simulation as demand winds down and queues begin to dissipate.
 
 #### Time-Space Trajectory Diagram (Corridor 0)
 
@@ -175,28 +177,29 @@ All features are standardised (zero mean, unit variance) before training.
 
 | Statistic | Value |
 |---|---|
-| Total records | 245,016 |
-| Training records | 171,671 |
-| Test records | 73,345 |
-| Train sequences | 164,321 |
-| Test sequences | 70,195 |
-| At free-flow (TT ≤ 1.01× free-flow) | 45.9% |
-| Congested records (TT > 1.1× free-flow) | 49.3% |
-| Heavily congested (TT > 1.5× free-flow) | 40.2% |
-| Travel time range | 21.6 – 105.0 s |
-| Mean travel time | 45.4 s |
-| Travel time std. dev. | 30.9 s |
+| Total records | 372,974 |
+| Training records | 263,286 |
+| Test records | 109,688 |
+| Train sequences | 250,266 |
+| Test sequences | 104,108 |
+| Unique links | 124 (70 corridor + 54 cross-links) |
+| At free-flow (TT ≤ 1.01× free-flow) | 59.2% |
+| Congested records (TT > 1.1× free-flow) | 38.3% |
+| Heavily congested (TT > 1.5× free-flow) | 26.6% |
+| Travel time range | 21.6 – 108.0 s |
+| Mean travel time | 33.4 s |
+| Travel time std. dev. | 21.2 s |
 
-Compared to the earlier grid-based approach (72% free-flow, 24% congested), the corridor-with-bottleneck design produces roughly **equal amounts of free-flow and congested data**, making the prediction problem substantially more meaningful.
+The interconnected network has more links (124 vs 70 previously) and produces a more varied dataset.  The cross-links enable route choice and congestion spillover between corridors, creating complex inter-corridor dynamics that make the prediction problem substantially harder.
 
 ### 4.2 Performance Metrics
 
 | Method | MAE (s) | RMSE (s) | R² |
 |---|---|---|---|
-| Naive Baseline | **2.524** | 6.475 | 0.958 |
-| Linear Regression | 3.050 | 6.359 | 0.960 |
-| Dense NN | 2.952 | 5.649 | 0.968 |
-| LSTM | 2.701 | **5.292** | **0.972** |
+| Naive Baseline | **6.889** | 14.124 | 0.603 |
+| Linear Regression | 7.542 | 12.847 | 0.672 |
+| Dense NN | 7.384 | 12.468 | 0.691 |
+| LSTM | 7.383 | **12.374** | **0.696** |
 
 - **MAE** (Mean Absolute Error): average absolute prediction error.
 - **RMSE** (Root Mean Squared Error): penalises large errors more heavily.
@@ -204,15 +207,15 @@ Compared to the earlier grid-based approach (72% free-flow, 24% congested), the 
 
 **Key findings:**
 
-1. **LSTM achieves the best RMSE and R²**, outperforming the naive baseline by 18% on RMSE (5.29 vs 6.47) and achieving R² = 0.972 vs 0.958.  The Dense NN also substantially outperforms the baseline (RMSE 5.65 vs 6.47, R² = 0.968).
+1. **The prediction task is substantially harder** with the interconnected network (R² ≈ 0.60–0.70) compared to the earlier independent-corridor design (R² ≈ 0.96).  Cross-corridor interactions create complex, less predictable congestion dynamics — congestion on one corridor can spill over to neighbours via the lateral connections, making single-link time-series alone insufficient for accurate prediction.
 
-2. **The naive baseline has the lowest MAE** (2.52 s) because it is exactly correct whenever travel time does not change between consecutive time-steps — which is the majority of observations during stable conditions.  However, its high RMSE reveals that it makes **large errors during congestion transitions** (onset and dissipation), which is precisely when accurate prediction matters most.
+2. **LSTM achieves the best RMSE and R²** (12.37 s and 0.696 respectively), followed closely by the Dense NN (12.47 s, 0.691).  Both outperform Linear Regression (12.85 s, 0.672) and the Naive Baseline (14.12 s, 0.603).
 
-3. **RMSE is the more informative metric** for this problem because it penalises the large errors during congestion transitions that the naive baseline cannot handle.  The LSTM's 18% RMSE reduction means substantially better predictions during the critical periods.
+3. **The naive baseline has the lowest MAE** (6.89 s) because it is exactly correct whenever travel time does not change between consecutive time-steps.  However, its high RMSE reveals that it makes **large errors during congestion transitions**, which are now more frequent and less predictable due to cross-corridor spillover effects.
 
-4. **Linear Regression** improves over the naive baseline on RMSE and R² but is limited by its inability to capture the non-linear dynamics of queue formation and dissipation.
+4. **RMSE is the more informative metric** for this problem.  The LSTM's 12% RMSE reduction vs the naive baseline shows that learned models capture temporal patterns that persistence forecasts cannot, even in this more challenging setting.
 
-5. **All R² values are very high** (≥ 0.958), reflecting that the corridor-with-bottleneck design produces a wide range of travel times with clear temporal patterns that all methods can leverage.
+5. **Lower R² values reflect the inherent unpredictability** introduced by inter-corridor interactions.  A link's future travel time now depends not only on its own history but also on conditions in neighbouring corridors — information not captured by the single-link features used here.  This suggests that incorporating spatial (cross-link) features could further improve predictions.
 
 ### 4.3 Visualisations
 
@@ -236,7 +239,7 @@ Both models converge within the first 20 epochs, with the gap between training a
 
 ![Histogram of travel times in the dataset](results/travel_time_distribution.png)
 
-The distribution is bimodal, reflecting the two traffic states in the kinematic wave model: free-flow (≈21.6 s) and queued (≈80–95 s).  The corridor-with-bottleneck design ensures that roughly half the data represents congested conditions.
+The distribution is bimodal, reflecting the two traffic states in the kinematic wave model: free-flow (≈21.6 s) and queued.  The interconnected network produces a mix of free-flow and congested conditions, with the cross-links creating intermediate travel time values between the two modes.
 
 #### Example Time-Series
 
@@ -246,15 +249,15 @@ An example of travel time evolution on a single link during one test scenario, s
 
 ## 5. Conclusion
 
-This experiment demonstrates short-term travel time prediction using past travel time observations on a congestion-rich corridor network:
+This experiment demonstrates short-term travel time prediction using past travel time observations on an interconnected corridor network with congestion spillover:
 
-1. **The corridor-with-bottleneck network design** resolves the problem of excessive free-flow data that plagued the grid-based approach.  By eliminating alternative routes, the bottleneck creates sustained congestion on upstream links, yielding roughly 50/50 free-flow and congested observations.
+1. **The interconnected corridor network** with lateral cross-links creates realistic inter-corridor interactions.  When one corridor's bottleneck becomes congested, vehicles can reroute through adjacent corridors, causing congestion spillover that makes the prediction problem substantially harder (R² ≈ 0.60–0.70 vs ≈ 0.96 for independent corridors).
 
-2. **LSTM and Dense NN outperform the naive baseline** on RMSE (18% and 13% reduction respectively) and R², demonstrating that learned models capture temporal dynamics of congestion transitions that a simple persistence forecast cannot.
+2. **LSTM and Dense NN outperform the naive baseline** on RMSE (12% and 12% reduction respectively) and R², demonstrating that learned models capture temporal dynamics of congestion transitions even in this more complex setting.
 
-3. **The naive baseline is competitive on MAE** because it is perfect during stable conditions, but its high RMSE reveals critical failures during congestion onset and dissipation — the periods when accurate forecasts are most valuable.
+3. **The naive baseline is competitive on MAE** because it is perfect during stable conditions, but its high RMSE reveals critical failures during congestion onset and dissipation — periods that are now more frequent and less predictable due to cross-corridor spillover.
 
-4. The **bimodal travel time distribution** is a physical property of the kinematic wave traffic model, where links transition sharply between free-flow and queued states.
+4. **The lower R² values highlight a key limitation**: single-link time-series features cannot fully capture the spatial dependencies introduced by cross-corridor interactions.  Incorporating features from neighbouring links (e.g., travel times on adjacent corridors) could substantially improve prediction accuracy.
 
 ## Reproducibility
 
