@@ -126,18 +126,6 @@ Three snapshots at key moments: (left) early in the simulation when demand is st
 
 Each line traces one vehicle's trajectory through the 7 consecutive links of corridor 0.  The horizontal axis is time, and the vertical axis is cumulative distance along the corridor.  Trajectories that are steep (nearly vertical) indicate high speed (free-flow), while trajectories that flatten out indicate vehicles slowing down or stopping in a queue.  The queue growth and dissipation wave is clearly visible.
 
-#### Time-Space Density Diagram (Corridor 0, Link L0_0)
-
-![Time-space density diagram](results/time_space_density.png)
-
-A heatmap of traffic density on the first link of corridor 0 over time (horizontal) and space (vertical).  Lighter colours indicate higher density (congestion), and dark regions indicate free-flow.  The congestion wave propagating upstream from the bottleneck is visible as a band of high density that grows over time.
-
-#### Cumulative Arrival/Departure Curves (Link L0_0)
-
-![Cumulative curves](results/cumulative_curves.png)
-
-The red curve shows cumulative vehicle arrivals and the blue curve shows cumulative departures at link L0_0.  The vertical gap between the curves represents the number of vehicles on the link at any given time — a growing gap indicates queue build-up.  The grey and black dots show instantaneous and actual travel times (right axis), which increase sharply when the queue forms.
-
 #### Macroscopic Fundamental Diagram (MFD)
 
 ![Macroscopic fundamental diagram](results/mfd.png)
@@ -235,18 +223,6 @@ The diagonal red dashed line represents perfect prediction.  The naive baseline 
 
 Both models converge within the first 20 epochs, with the gap between training and validation loss indicating reasonable generalisation.
 
-#### Travel Time Distribution
-
-![Histogram of travel times in the dataset](results/travel_time_distribution.png)
-
-The distribution is bimodal, reflecting the two traffic states in the kinematic wave model: free-flow (≈21.6 s) and queued.  The interconnected network produces a mix of free-flow and congested conditions, with the cross-links creating intermediate travel time values between the two modes.
-
-#### Example Time-Series
-
-![Example time-series of travel time](results/example_time_series.png)
-
-An example of travel time evolution on a single link during one test scenario, showing the congestion build-up driven by the bottleneck and its eventual dissipation.
-
 ## 5. Conclusion
 
 This experiment demonstrates short-term travel time prediction using past travel time observations on an interconnected corridor network with congestion spillover:
@@ -275,13 +251,9 @@ All code and data are included in this repository:
 │   ├── metrics_comparison.png
 │   ├── scatter_pred_vs_actual.png
 │   ├── training_loss.png
-│   ├── travel_time_distribution.png
-│   ├── example_time_series.png
 │   ├── network_animation.gif     # Traffic simulation animation
 │   ├── network_snapshot_*.png    # Network state snapshots
 │   ├── time_space_trajectory.png # Vehicle trajectory diagram
-│   ├── time_space_density.png    # Traffic density heatmap
-│   ├── cumulative_curves.png     # Arrival/departure curves
 │   └── mfd.png                   # Macroscopic fundamental diagram
 └── report.md                     # This report
 ```

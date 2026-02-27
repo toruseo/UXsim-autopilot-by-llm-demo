@@ -49,7 +49,7 @@ def build_network(W):
         for p in range(NODES_PER_CORRIDOR):
             name = f"N{c}_{p}"
             nodes[(c, p)] = W.addNode(
-                name, p * LINK_LENGTH, c * LINK_LENGTH * 3)
+                name, c * LINK_LENGTH * 3, p * LINK_LENGTH)
 
     btl_positions = np.random.randint(
         NODES_PER_CORRIDOR - 4, NODES_PER_CORRIDOR - 1, size=NUM_CORRIDORS)
@@ -167,7 +167,7 @@ def main():
         file_name=anim_path,
         animation_speed_inverse=10,
         detailed=0,
-        figsize=(12, 6),
+        figsize=(16, 5),
         timestep_skip=8,
         network_font_size=0,
         node_size=4,
@@ -188,7 +188,7 @@ def main():
         W.analyzer.network(
             t=t,
             detailed=1,
-            figsize=(12, 6),
+            figsize=(16, 5),
             network_font_size=0,
             node_size=4,
         )
