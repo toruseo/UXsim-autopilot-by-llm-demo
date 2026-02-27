@@ -1,15 +1,14 @@
 """
 Generate synthetic traffic data using UXsim.
 
-Creates a 5x5 grid network with time-varying demand that produces
-significant congestion (without gridlock) for travel time prediction.
-A Gaussian peak demand pattern creates realistic congestion buildup
-and dissipation.
+Creates a set of parallel corridor networks, each with a capacity
+bottleneck that naturally produces sustained congestion upstream.
+This design concentrates traffic flow (no alternative routes) so that
+a large fraction of recorded travel times reflect congested conditions.
 """
 
 import os
 import random
-import itertools
 
 import numpy as np
 import pandas as pd
@@ -19,17 +18,18 @@ from uxsim import World
 # Configuration
 # ---------------------------------------------------------------------------
 RANDOM_SEED = 42
-NUM_SCENARIOS = 30          # total simulation scenarios
-GRID_SIZE = 5               # 5x5 grid
-LINK_LENGTH = 500           # metres
-FREE_FLOW_SPEED = 50 / 3.6  # km/h -> m/s  (~13.9 m/s)
-JAM_DENSITY = 0.2           # veh/m
-SIM_DURATION = 7200          # seconds (2 hours, for congestion cycle)
-DEMAND_INTERVAL = 300        # seconds – resolution for demand slicing
-PEAK_FACTOR = 2.0            # peak-to-base demand ratio
-DEMAND_SCALE_MIN = 0.7       # minimum demand scale across scenarios
-DEMAND_SCALE_MAX = 1.0       # maximum demand scale across scenarios
-RECORD_DT = 30               # seconds – sampling interval for records
+NUM_SCENARIOS = 30               # total simulation scenarios
+NUM_CORRIDORS = 10               # parallel corridors per scenario
+NODES_PER_CORRIDOR = 8           # nodes per corridor (7 links each)
+LINK_LENGTH = 300                # metres
+FREE_FLOW_SPEED = 50 / 3.6      # km/h -> m/s  (~13.9 m/s)
+JAM_DENSITY = 0.2                # veh/m  (normal links)
+BOTTLENECK_JAM_DENSITY = 0.05    # veh/m  (bottleneck links — 25% capacity)
+SIM_DURATION = 3600              # seconds (1 hour)
+DEMAND_INTERVAL = 300            # seconds – resolution for demand slicing
+DEMAND_SCALE_MIN = 1.5           # minimum demand scale across scenarios
+DEMAND_SCALE_MAX = 3.0           # maximum demand scale across scenarios
+RECORD_DT = 30                   # seconds – sampling interval for records
 OUTPUT_DIR = "data"
 
 np.random.seed(RANDOM_SEED)
@@ -37,68 +37,66 @@ random.seed(RANDOM_SEED)
 
 
 def build_network(W):
-    """Create a 5x5 grid network and return a dict of node references."""
-    nodes = {}
-    for i in range(GRID_SIZE):
-        for j in range(GRID_SIZE):
-            name = f"N{i}_{j}"
-            nodes[(i, j)] = W.addNode(name, i * LINK_LENGTH, j * LINK_LENGTH)
+    """Create parallel corridor networks with bottleneck links.
 
-    for i in range(GRID_SIZE):
-        for j in range(GRID_SIZE):
-            if j + 1 < GRID_SIZE:
-                W.addLink(f"L{i}_{j}_to_{i}_{j+1}",
-                          nodes[(i, j)], nodes[(i, j + 1)],
-                          length=LINK_LENGTH,
-                          free_flow_speed=FREE_FLOW_SPEED,
-                          jam_density=JAM_DENSITY)
-                W.addLink(f"L{i}_{j+1}_to_{i}_{j}",
-                          nodes[(i, j + 1)], nodes[(i, j)],
-                          length=LINK_LENGTH,
-                          free_flow_speed=FREE_FLOW_SPEED,
-                          jam_density=JAM_DENSITY)
-            if i + 1 < GRID_SIZE:
-                W.addLink(f"L{i}_{j}_to_{i+1}_{j}",
-                          nodes[(i, j)], nodes[(i + 1, j)],
-                          length=LINK_LENGTH,
-                          free_flow_speed=FREE_FLOW_SPEED,
-                          jam_density=JAM_DENSITY)
-                W.addLink(f"L{i+1}_{j}_to_{i}_{j}",
-                          nodes[(i + 1, j)], nodes[(i, j)],
-                          length=LINK_LENGTH,
-                          free_flow_speed=FREE_FLOW_SPEED,
-                          jam_density=JAM_DENSITY)
-    return nodes
+    Each corridor is a linear sequence of nodes connected by
+    one-directional links.  One link per corridor has reduced
+    capacity (bottleneck) placed near the downstream end so that
+    queues build upstream through most of the corridor.
+
+    Returns
+    -------
+    nodes : dict
+        Mapping (corridor, position) -> node reference.
+    btl_positions : ndarray
+        Bottleneck link position for each corridor.
+    """
+    nodes = {}
+    for c in range(NUM_CORRIDORS):
+        for p in range(NODES_PER_CORRIDOR):
+            name = f"N{c}_{p}"
+            nodes[(c, p)] = W.addNode(
+                name, p * LINK_LENGTH, c * LINK_LENGTH * 3)
+
+    btl_positions = np.random.randint(4, 7, size=NUM_CORRIDORS)
+
+    for c in range(NUM_CORRIDORS):
+        for p in range(NODES_PER_CORRIDOR - 1):
+            is_btl = (p == btl_positions[c])
+            jd = BOTTLENECK_JAM_DENSITY if is_btl else JAM_DENSITY
+            W.addLink(f"L{c}_{p}",
+                      nodes[(c, p)], nodes[(c, p + 1)],
+                      length=LINK_LENGTH,
+                      free_flow_speed=FREE_FLOW_SPEED,
+                      jam_density=jd)
+
+    return nodes, btl_positions
 
 
 def add_demand(W, nodes, demand_scale):
+    """Add sustained demand along each corridor.
+
+    A trapezoidal time profile provides a short ramp-up, a long
+    plateau of high demand (exceeding bottleneck capacity), and a
+    brief wind-down.  This keeps links upstream of the bottleneck
+    congested for most of the simulation.
     """
-    Add OD demand between boundary nodes with time-varying pattern.
-
-    A Gaussian peak centred at 40% of the simulation creates a realistic
-    congestion build-up and dissipation cycle.  ``demand_scale`` controls
-    overall volume (higher -> more congestion).
-    """
-    boundary = []
-    for i in range(GRID_SIZE):
-        for j in range(GRID_SIZE):
-            if i == 0 or i == GRID_SIZE - 1 or j == 0 or j == GRID_SIZE - 1:
-                boundary.append((i, j))
-
-    od_pairs = [(o, d) for o, d in itertools.product(boundary, boundary)
-                if o != d and abs(o[0] - d[0]) + abs(o[1] - d[1]) >= 3]
-
-    peak_centre = SIM_DURATION * 0.4
-    peak_sigma = SIM_DURATION * 0.15
-
-    for o, d in od_pairs:
-        base_rate = demand_scale * np.random.uniform(0.015, 0.04)
+    for c in range(NUM_CORRIDORS):
+        base_rate = demand_scale * np.random.uniform(0.15, 0.35)
         for t_start in range(0, SIM_DURATION, DEMAND_INTERVAL):
             t_mid = t_start + DEMAND_INTERVAL / 2
-            time_factor = 1.0 + (PEAK_FACTOR - 1.0) * np.exp(
-                -((t_mid - peak_centre) ** 2) / (2 * peak_sigma ** 2))
-            rate = base_rate * time_factor * np.random.uniform(0.7, 1.3)
-            W.adddemand(nodes[o], nodes[d], t_start,
+            # Trapezoidal profile: ramp 0-10%, plateau 10-85%, wind-down 85-100%
+            if t_mid < SIM_DURATION * 0.1:
+                time_factor = t_mid / (SIM_DURATION * 0.1)
+            elif t_mid < SIM_DURATION * 0.85:
+                time_factor = 1.0
+            else:
+                time_factor = max(0.05, 1.0 - (t_mid - SIM_DURATION * 0.85)
+                                  / (SIM_DURATION * 0.15))
+            rate = base_rate * time_factor * np.random.uniform(0.8, 1.2)
+            W.adddemand(nodes[(c, 0)],
+                        nodes[(c, NODES_PER_CORRIDOR - 1)],
+                        t_start,
                         min(t_start + DEMAND_INTERVAL, SIM_DURATION),
                         flow=rate)
 
@@ -111,17 +109,17 @@ def run_scenario(scenario_id, demand_scale):
               print_mode=0,
               save_mode=0)
 
-    nodes = build_network(W)
+    nodes, btl_positions = build_network(W)
     add_demand(W, nodes, demand_scale)
 
     W.exec_simulation()
     W.analyzer.basic_analysis()
 
-    dt = W.DELTAT  # simulation time-step (seconds)
+    dt = W.DELTAT
     records = []
 
     for link in W.LINKS:
-        tt_instant = link.traveltime_instant  # length = TMAX / DELTAT
+        tt_instant = link.traveltime_instant
         cum_arr = link.cum_arrival
         cum_dep = link.cum_departure
         free_flow_tt = link.length / link.free_flow_speed
@@ -131,7 +129,6 @@ def run_scenario(scenario_id, demand_scale):
         for step in range(0, n_steps, sample_step):
             t = step * dt
             tt = float(tt_instant[step])
-            # number of vehicles = cumulative arrivals - departures
             n_veh = (cum_arr[step] - cum_dep[step]) if step < len(cum_arr) else 0
             density_est = n_veh / link.length if link.length > 0 else 0
 
@@ -174,9 +171,10 @@ def main():
     df.to_csv(out_path, index=False)
     print(f"\nSaved {len(df)} records to {out_path}")
 
+    # All links share the same length and speed in this network.
     ff_tt = df["free_flow_tt"].iloc[0]
     print(f"\nCongestion statistics:")
-    print(f"  At free-flow (TT = {ff_tt:.0f}s): "
+    print(f"  At free-flow (TT = {ff_tt:.1f}s): "
           f"{(df['travel_time'] <= ff_tt * 1.01).mean()*100:.1f}%")
     print(f"  Congested (TT > 1.1x free-flow): "
           f"{(df['travel_time'] > ff_tt * 1.1).mean()*100:.1f}%")
