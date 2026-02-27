@@ -214,7 +214,7 @@ The interconnected network has more links (124 vs 70 previously) and produces a 
 
 **Key findings:**
 
-1. **The prediction task is substantially harder** with the interconnected network (R² ≈ 0.60–0.70) compared to the earlier independent-corridor design (R² ≈ 0.96).  Cross-corridor interactions create complex, less predictable congestion dynamics — congestion on one corridor can spill over to neighbours via the lateral connections, making single-link time-series alone insufficient for accurate prediction.
+1. **The prediction task is substantially harder** with the interconnected network (R² ≈ 0.60–0.70) compared to the earlier independent-corridor design (R² ≈ 0.96).  Cross-corridor interactions create complex, less predictable congestion dynamics — congestion on one corridor can spill over to neighbours via the lateral connections.  Note that although the models are trained on data from all 124 links across the entire network, each prediction uses only the target link's own past travel times as input features, without incorporating information from neighbouring links.
 
 2. **LSTM achieves the best RMSE and R²** (12.37 s and 0.696 respectively), followed closely by the Dense NN (12.47 s, 0.691).  Both outperform Linear Regression (12.85 s, 0.672) and the Naive Baseline (14.12 s, 0.603).
 
@@ -222,7 +222,7 @@ The interconnected network has more links (124 vs 70 previously) and produces a 
 
 4. **RMSE is the more informative metric** for this problem.  The LSTM's 12% RMSE reduction vs the naive baseline shows that learned models capture temporal patterns that persistence forecasts cannot, even in this more challenging setting.
 
-5. **Lower R² values reflect the inherent unpredictability** introduced by inter-corridor interactions.  A link's future travel time now depends not only on its own history but also on conditions in neighbouring corridors — information not captured by the single-link features used here.  This suggests that incorporating spatial (cross-link) features could further improve predictions.
+5. **Lower R² values reflect the inherent unpredictability** introduced by inter-corridor interactions.  Although the models are trained on data pooled from all links across the network, each prediction's input consists only of the target link's own past 5 travel times.  A link's future travel time now depends not only on its own history but also on conditions in neighbouring corridors — information not included in the per-prediction input features.  Incorporating spatial features (e.g., concurrent travel times on adjacent links) as additional inputs could further improve predictions.
 
 ### 4.3 Visualisations
 
@@ -252,7 +252,7 @@ This experiment demonstrates short-term travel time prediction using past travel
 
 3. **The naive baseline is competitive on MAE** because it is perfect during stable conditions, but its high RMSE reveals critical failures during congestion onset and dissipation — periods that are now more frequent and less predictable due to cross-corridor spillover.
 
-4. **The lower R² values highlight a key limitation**: single-link time-series features cannot fully capture the spatial dependencies introduced by cross-corridor interactions.  Incorporating features from neighbouring links (e.g., travel times on adjacent corridors) could substantially improve prediction accuracy.
+4. **The lower R² values highlight a key limitation of the per-prediction input design**: although training data is drawn from all links across the network, each prediction only uses the target link's own past travel times as input.  Extending the input features to include travel times from neighbouring links could capture cross-corridor spatial dependencies and substantially improve prediction accuracy.
 
 ## Reproducibility
 
