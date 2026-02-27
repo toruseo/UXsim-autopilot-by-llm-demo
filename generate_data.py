@@ -1,9 +1,10 @@
 """
 Generate synthetic traffic data using UXsim.
 
-Creates a 5x5 grid network with slightly randomized demand.
-Runs multiple simulation scenarios to produce training and testing data
-for travel time prediction.
+Creates a 5x5 grid network with time-varying demand that produces
+significant congestion (without gridlock) for travel time prediction.
+A Gaussian peak demand pattern creates realistic congestion buildup
+and dissipation.
 """
 
 import os
@@ -23,8 +24,9 @@ GRID_SIZE = 5               # 5x5 grid
 LINK_LENGTH = 500           # metres
 FREE_FLOW_SPEED = 50 / 3.6  # km/h -> m/s  (~13.9 m/s)
 JAM_DENSITY = 0.2           # veh/m
-SIM_DURATION = 3600          # seconds (1 hour)
+SIM_DURATION = 7200          # seconds (2 hours, for congestion cycle)
 DEMAND_INTERVAL = 300        # seconds – resolution for demand slicing
+PEAK_FACTOR = 2.0            # peak-to-base demand ratio
 RECORD_DT = 30               # seconds – sampling interval for records
 OUTPUT_DIR = "data"
 
@@ -69,8 +71,11 @@ def build_network(W):
 
 def add_demand(W, nodes, demand_scale):
     """
-    Add OD demand between boundary nodes with slight randomisation.
-    demand_scale controls overall volume (higher -> more congestion).
+    Add OD demand between boundary nodes with time-varying pattern.
+
+    A Gaussian peak centred at 40% of the simulation creates a realistic
+    congestion build-up and dissipation cycle.  ``demand_scale`` controls
+    overall volume (higher -> more congestion).
     """
     boundary = []
     for i in range(GRID_SIZE):
@@ -81,10 +86,16 @@ def add_demand(W, nodes, demand_scale):
     od_pairs = [(o, d) for o, d in itertools.product(boundary, boundary)
                 if o != d and abs(o[0] - d[0]) + abs(o[1] - d[1]) >= 3]
 
+    peak_centre = SIM_DURATION * 0.4
+    peak_sigma = SIM_DURATION * 0.15
+
     for o, d in od_pairs:
-        base_rate = demand_scale * np.random.uniform(0.01, 0.03)
+        base_rate = demand_scale * np.random.uniform(0.015, 0.04)
         for t_start in range(0, SIM_DURATION, DEMAND_INTERVAL):
-            rate = base_rate * np.random.uniform(0.7, 1.3)
+            t_mid = t_start + DEMAND_INTERVAL / 2
+            time_factor = 1.0 + (PEAK_FACTOR - 1.0) * np.exp(
+                -((t_mid - peak_centre) ** 2) / (2 * peak_sigma ** 2))
+            rate = base_rate * time_factor * np.random.uniform(0.7, 1.3)
             W.adddemand(nodes[o], nodes[d], t_start,
                         min(t_start + DEMAND_INTERVAL, SIM_DURATION),
                         flow=rate)
@@ -142,7 +153,7 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     all_records = []
-    demand_scales = np.random.uniform(0.5, 1.8, size=NUM_SCENARIOS)
+    demand_scales = np.random.uniform(0.7, 1.0, size=NUM_SCENARIOS)
 
     for sid in range(NUM_SCENARIOS):
         print(f"Running scenario {sid + 1}/{NUM_SCENARIOS} "
@@ -159,7 +170,16 @@ def main():
     out_path = os.path.join(OUTPUT_DIR, "traffic_data.csv")
     df.to_csv(out_path, index=False)
     print(f"\nSaved {len(df)} records to {out_path}")
-    print(df.describe())
+
+    ff_tt = df["free_flow_tt"].iloc[0]
+    print(f"\nCongestion statistics:")
+    print(f"  At free-flow (TT = {ff_tt:.0f}s): "
+          f"{(df['travel_time'] <= ff_tt * 1.01).mean()*100:.1f}%")
+    print(f"  Congested (TT > 1.1x free-flow): "
+          f"{(df['travel_time'] > ff_tt * 1.1).mean()*100:.1f}%")
+    print(f"  Heavily congested (TT > 1.5x free-flow): "
+          f"{(df['travel_time'] > ff_tt * 1.5).mean()*100:.1f}%")
+    print(df["travel_time"].describe())
 
 
 if __name__ == "__main__":
