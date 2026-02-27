@@ -100,7 +100,49 @@ Each corridor has **one bottleneck link** placed near the downstream end (positi
 - Base flow rates are randomised per corridor within [0.15, 0.35] veh/s (scaled by `demand_scale`).
 - The simulation uses a platoon size (`deltan`) of 5 vehicles and runs for **3600 seconds (1 hour)**.
 
-### 3.3 Prediction Task
+### 3.3 Traffic Simulation Visualisation
+
+The following visualisations (produced by UXsim's built-in analysis tools on a representative scenario with `demand_scale = 2.5`) illustrate the congestion dynamics that the prediction models must capture.
+
+#### Network State Animation
+
+![Network state animation](results/network_animation.gif)
+
+The animated GIF shows the evolution of traffic density and speed across all 10 corridors over the full 1-hour simulation.  Link colour indicates speed (yellow = free-flow, dark blue/purple = congested) and link width indicates density.  Congestion builds upstream of each corridor's bottleneck during the demand plateau and gradually dissipates after demand drops.
+
+#### Network Snapshots
+
+| t = 360 s (early ramp-up) | t = 1800 s (peak congestion) | t = 3240 s (wind-down) |
+|:---:|:---:|:---:|
+| ![Early](results/network_snapshot_early.png) | ![Peak](results/network_snapshot_peak.png) | ![Late](results/network_snapshot_late.png) |
+
+Three snapshots at key moments: (left) early in the simulation when demand is still ramping up and most links are in free-flow; (centre) mid-simulation when sustained high demand has created long queues upstream of every bottleneck; (right) late in the simulation as demand winds down and queues begin to dissipate.
+
+#### Time-Space Trajectory Diagram (Corridor 0)
+
+![Time-space trajectory diagram](results/time_space_trajectory.png)
+
+Each line traces one vehicle's trajectory through the 7 consecutive links of corridor 0.  The horizontal axis is time, and the vertical axis is cumulative distance along the corridor.  Trajectories that are steep (nearly vertical) indicate high speed (free-flow), while trajectories that flatten out indicate vehicles slowing down or stopping in a queue.  The queue growth and dissipation wave is clearly visible.
+
+#### Time-Space Density Diagram (Corridor 0, Link L0_0)
+
+![Time-space density diagram](results/time_space_density.png)
+
+A heatmap of traffic density on the first link of corridor 0 over time (horizontal) and space (vertical).  Lighter colours indicate higher density (congestion), and dark regions indicate free-flow.  The congestion wave propagating upstream from the bottleneck is visible as a band of high density that grows over time.
+
+#### Cumulative Arrival/Departure Curves (Link L0_0)
+
+![Cumulative curves](results/cumulative_curves.png)
+
+The red curve shows cumulative vehicle arrivals and the blue curve shows cumulative departures at link L0_0.  The vertical gap between the curves represents the number of vehicles on the link at any given time — a growing gap indicates queue build-up.  The grey and black dots show instantaneous and actual travel times (right axis), which increase sharply when the queue forms.
+
+#### Macroscopic Fundamental Diagram (MFD)
+
+![Macroscopic fundamental diagram](results/mfd.png)
+
+The MFD shows the relationship between network-wide vehicle accumulation and flow.  The characteristic inverted-U shape confirms that the simulation produces both free-flow conditions (rising limb) and congested conditions (falling limb), validating the network design.
+
+### 3.4 Prediction Task
 
 This is a **short-term prediction** problem:
 
@@ -108,12 +150,12 @@ This is a **short-term prediction** problem:
 - **Output**: Travel time at the next time-step (30 s ahead)
 - Sequences are built per (scenario, link) group, sorted by time
 
-### 3.4 Train/Test Split
+### 3.5 Train/Test Split
 
 - Data is split by **scenario**: 21 scenarios for training (~70%) and 9 scenarios for testing (~30%).
 - This ensures the models generalise to unseen traffic conditions rather than memorising specific scenarios.
 
-### 3.5 Model Configuration
+### 3.6 Model Configuration
 
 | Hyperparameter | Linear Reg. | Dense NN | LSTM |
 |---|---|---|---|
@@ -219,19 +261,26 @@ This experiment demonstrates short-term travel time prediction using past travel
 All code and data are included in this repository:
 
 ```
-├── generate_data.py          # UXsim simulation and data generation
-├── train_and_evaluate.py     # Model training, evaluation, and plotting
-├── requirements.txt          # Python dependencies
+├── generate_data.py              # UXsim simulation and data generation
+├── generate_visualizations.py    # UXsim traffic simulation visualizations
+├── train_and_evaluate.py         # Model training, evaluation, and plotting
+├── requirements.txt              # Python dependencies
 ├── data/
-│   └── traffic_data.csv      # Generated synthetic traffic data
+│   └── traffic_data.csv          # Generated synthetic traffic data
 ├── results/
-│   ├── metrics.csv           # Numerical results
+│   ├── metrics.csv               # Numerical results
 │   ├── metrics_comparison.png
 │   ├── scatter_pred_vs_actual.png
 │   ├── training_loss.png
 │   ├── travel_time_distribution.png
-│   └── example_time_series.png
-└── report.md                 # This report
+│   ├── example_time_series.png
+│   ├── network_animation.gif     # Traffic simulation animation
+│   ├── network_snapshot_*.png    # Network state snapshots
+│   ├── time_space_trajectory.png # Vehicle trajectory diagram
+│   ├── time_space_density.png    # Traffic density heatmap
+│   ├── cumulative_curves.png     # Arrival/departure curves
+│   └── mfd.png                   # Macroscopic fundamental diagram
+└── report.md                     # This report
 ```
 
 To reproduce:
@@ -239,5 +288,6 @@ To reproduce:
 ```bash
 pip install -r requirements.txt
 python generate_data.py
+python generate_visualizations.py
 python train_and_evaluate.py
 ```
