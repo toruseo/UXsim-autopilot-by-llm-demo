@@ -2,8 +2,11 @@
 Train and evaluate short-term travel time prediction models.
 
 Problem formulation:
-  Given the travel times of a link at the past LOOKBACK time-steps,
-  predict the travel time at the next time-step.
+  Given the travel times of a link **and its network-adjacent neighbours**
+  at the past LOOKBACK time-steps, predict the travel time at the next
+  time-step.  Neighbour features are the mean travel time of all links
+  sharing a node with the target link, capturing spatial dependencies
+  introduced by cross-corridor interactions.
 
 Methods compared:
   0. Naive Baseline  (predict TT_next = TT_current)
@@ -52,20 +55,81 @@ tf.random.set_seed(RANDOM_SEED)
 
 # ===== helpers =============================================================
 
+def build_neighbor_map(link_names):
+    """Build mapping from each link to its network-adjacent neighbours.
+
+    Two links are neighbours if they share a node in the network graph.
+    Link naming conventions (from ``generate_data.py``):
+      - Corridor link ``L{c}_{p}``:  node N{c}_{p}  →  N{c}_{p+1}
+      - Cross-link   ``X{a}to{b}_{p}``: node N{a}_{p} →  N{b}_{p}
+    """
+    link_endpoints = {}
+    for name in link_names:
+        if name.startswith("L"):
+            parts = name[1:].split("_")
+            c, p = int(parts[0]), int(parts[1])
+            link_endpoints[name] = (f"N{c}_{p}", f"N{c}_{p + 1}")
+        elif name.startswith("X"):
+            rest = name[1:]
+            ab, p_str = rest.rsplit("_", 1)
+            a_str, b_str = ab.split("to")
+            link_endpoints[name] = (f"N{a_str}_{p_str}", f"N{b_str}_{p_str}")
+
+    # Build node → links incidence list
+    node_links = {}
+    for link, (start, end) in link_endpoints.items():
+        node_links.setdefault(start, set()).add(link)
+        node_links.setdefault(end, set()).add(link)
+
+    # Neighbours = other links sharing at least one node
+    neighbors = {}
+    for link, (start, end) in link_endpoints.items():
+        nbr = set()
+        for node in (start, end):
+            nbr |= node_links[node]
+        nbr.discard(link)
+        neighbors[link] = sorted(nbr)
+    return neighbors
+
+
 def build_sequences(df, lookback):
     """Build (X, y) arrays for short-term TT prediction.
 
     For each (scenario, link) group sorted by time, create sliding
-    windows of length ``lookback`` from the travel_time column.
+    windows of length ``lookback``.  Each sample contains:
+      - the link's own past travel times  (``lookback`` values)
+      - the mean travel time of its network-adjacent neighbours at
+        the same past time-steps  (``lookback`` values)
 
-    X shape: (N, lookback)  — past travel times
-    y shape: (N,)           — next travel time
+    X shape: (N, lookback * 2)  — own TT + mean-neighbour TT
+    y shape: (N,)               — next travel time
     """
+    link_names = sorted(df["link"].unique())
+    neighbors = build_neighbor_map(link_names)
+
+    # Fast lookup: (scenario, time, link) → travel_time
+    tt_lookup = {}
+    for row in df.itertuples(index=False):
+        tt_lookup[(row.scenario, row.time, row.link)] = row.travel_time
+
     X_all, y_all = [], []
     for (sc, lk), grp in df.groupby(["scenario", "link"]):
-        tt = grp.sort_values("time")["travel_time"].values.astype(np.float32)
+        grp_sorted = grp.sort_values("time")
+        tt = grp_sorted["travel_time"].values.astype(np.float32)
+        times = grp_sorted["time"].values
+        nbrs = neighbors.get(lk, [])
+
+        # Vectorised mean-neighbour TT for every time-step of this group
+        nbr_mean = np.empty(len(times), dtype=np.float32)
+        for idx, t in enumerate(times):
+            vals = [tt_lookup[(sc, t, n)]
+                    for n in nbrs if (sc, t, n) in tt_lookup]
+            nbr_mean[idx] = np.mean(vals).astype(np.float32) if vals else tt[idx]
+
         for i in range(lookback, len(tt)):
-            X_all.append(tt[i - lookback:i])
+            own_feat = tt[i - lookback:i]
+            nbr_feat = nbr_mean[i - lookback:i]
+            X_all.append(np.concatenate([own_feat, nbr_feat]))
             y_all.append(tt[i])
     return np.array(X_all, dtype=np.float32), np.array(y_all, dtype=np.float32)
 
@@ -147,7 +211,7 @@ def main():
     # 4a. Naive Baseline: predict TT_next = TT_current
     # ------------------------------------------------------------------
     print("\n--- Naive Baseline (TT_next = TT_current) ---")
-    y_pred_naive = X_test[:, -1]  # last element of lookback window
+    y_pred_naive = X_test[:, LOOKBACK - 1]  # last own-TT in lookback window
     results.append(evaluate(y_test, y_pred_naive, "Naive Baseline"))
 
     # ------------------------------------------------------------------
@@ -167,7 +231,7 @@ def main():
     # 4c. Dense Neural Network
     # ------------------------------------------------------------------
     print("\n--- Dense Neural Network ---")
-    model_dense = build_dense_model(LOOKBACK)
+    model_dense = build_dense_model(LOOKBACK * 2)
     history_dense = model_dense.fit(
         X_train_sc, y_train,
         validation_split=0.1,
@@ -183,13 +247,19 @@ def main():
     # ------------------------------------------------------------------
     print("\n--- LSTM ---")
     # LSTM expects (samples, timesteps, features)
+    # Feature layout: [own_0..4, nbr_0..4] → reshape to (timesteps, 2)
+    n_features = 2  # own TT + mean-neighbour TT
     scaler_lstm = StandardScaler()
     X_train_flat = scaler_lstm.fit_transform(X_train)
     X_test_flat = scaler_lstm.transform(X_test)
-    X_train_lstm = X_train_flat.reshape(-1, LOOKBACK, 1)
-    X_test_lstm = X_test_flat.reshape(-1, LOOKBACK, 1)
+    X_train_lstm = np.stack(
+        [X_train_flat[:, :LOOKBACK], X_train_flat[:, LOOKBACK:]], axis=-1
+    )
+    X_test_lstm = np.stack(
+        [X_test_flat[:, :LOOKBACK], X_test_flat[:, LOOKBACK:]], axis=-1
+    )
 
-    model_lstm = build_lstm_model(LOOKBACK, n_features=1)
+    model_lstm = build_lstm_model(LOOKBACK, n_features=n_features)
     history_lstm = model_lstm.fit(
         X_train_lstm, y_train,
         validation_split=0.1,
