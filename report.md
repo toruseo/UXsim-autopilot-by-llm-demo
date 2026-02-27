@@ -2,8 +2,8 @@
 
 ## 1. Introduction
 
-This report presents a numerical experiment on **short-term link-level travel time prediction** in a simulated urban traffic network.
-We generate synthetic traffic data with realistic congestion patterns using the mesoscopic traffic simulator [UXsim](https://github.com/toruseo/UXsim), then compare four prediction methods:
+This report presents a numerical experiment on **short-term link-level travel time prediction** in a simulated traffic network.
+We generate synthetic traffic data with substantial congestion using the mesoscopic traffic simulator [UXsim](https://github.com/toruseo/UXsim), then compare four prediction methods:
 
 0. **Naive Baseline** — predicts that the next travel time equals the current travel time
 1. **Linear Regression**
@@ -75,24 +75,30 @@ The final hidden state $\mathbf{h}_L$ is passed through a dense layer to produce
 
 ### 3.1 Network Topology
 
-A **5 × 5 grid network** is constructed with:
+The previous grid-based approach produced too much free-flow data (~72%) because the grid provides many alternative routes, spreading traffic thinly across peripheral links.
+
+To address this, we adopt a **corridor-with-bottleneck** design: 10 parallel one-directional corridors, each containing a capacity bottleneck that forces queuing upstream.
 
 | Parameter | Value |
 |---|---|
-| Grid size | 5 × 5 (25 nodes) |
-| Number of links | 80 (bi-directional) |
-| Link length | 500 m |
+| Corridors | 10 parallel one-directional corridors |
+| Nodes per corridor | 8 (7 links each) |
+| Total links | 70 |
+| Link length | 300 m |
 | Free-flow speed | 50 km/h (13.9 m/s) |
-| Jam density | 0.2 veh/m |
-| Free-flow travel time | 36.0 s per link |
+| Normal jam density | 0.2 veh/m |
+| Bottleneck jam density | 0.05 veh/m (25% of normal capacity) |
+| Free-flow travel time | 21.6 s per link |
+
+Each corridor has **one bottleneck link** placed near the downstream end (positions 4–6, randomised per corridor).  Because traffic has no alternative route around the bottleneck, sustained demand above the bottleneck capacity creates queues that propagate upstream through most of the corridor.
 
 ### 3.2 Demand Generation
 
-- **30 simulation scenarios** are run, each with a different `demand_scale` sampled uniformly from [0.7, 1.0].
-- Origin-destination (OD) pairs are selected between boundary nodes with a Manhattan distance ≥ 3.
-- For each OD pair, demand is generated in 300-second intervals with a base flow rate randomised within [0.015, 0.04] veh/s (scaled by `demand_scale`).
-- A **Gaussian peak demand pattern** is applied, centred at 40% of the simulation duration (peak factor = 2.0). This creates a realistic congestion build-up and dissipation cycle within each scenario.
-- The simulation uses a platoon size (`deltan`) of 5 vehicles and runs for **7200 seconds (2 hours)**.
+- **30 simulation scenarios** are run, each with a different `demand_scale` sampled uniformly from [1.5, 3.0].
+- Each corridor receives one-directional demand from its origin to its destination node.
+- A **trapezoidal demand profile** (ramp-up 0–10%, plateau 10–85%, wind-down 85–100%) maintains high demand for most of the simulation, ensuring sustained congestion rather than a brief peak.
+- Base flow rates are randomised per corridor within [0.15, 0.35] veh/s (scaled by `demand_scale`).
+- The simulation uses a platoon size (`deltan`) of 5 vehicles and runs for **3600 seconds (1 hour)**.
 
 ### 3.3 Prediction Task
 
@@ -127,25 +133,28 @@ All features are standardised (zero mean, unit variance) before training.
 
 | Statistic | Value |
 |---|---|
-| Total records | 535,405 |
-| Training records | 374,795 |
-| Test records | 160,610 |
-| Train sequences | 366,395 |
-| Test sequences | 157,010 |
-| Congested records (TT > 1.1× free-flow) | 24.0% |
-| Heavily congested (TT > 1.5× free-flow) | 8.5% |
-| Travel time range | 36.0 – 180.0 s |
-| Mean travel time | 41.4 s |
-| Travel time std. dev. | 15.1 s |
+| Total records | 245,016 |
+| Training records | 171,671 |
+| Test records | 73,345 |
+| Train sequences | 164,321 |
+| Test sequences | 70,195 |
+| At free-flow (TT ≤ 1.01× free-flow) | 45.9% |
+| Congested records (TT > 1.1× free-flow) | 49.3% |
+| Heavily congested (TT > 1.5× free-flow) | 40.2% |
+| Travel time range | 21.6 – 105.0 s |
+| Mean travel time | 45.4 s |
+| Travel time std. dev. | 30.9 s |
+
+Compared to the earlier grid-based approach (72% free-flow, 24% congested), the corridor-with-bottleneck design produces roughly **equal amounts of free-flow and congested data**, making the prediction problem substantially more meaningful.
 
 ### 4.2 Performance Metrics
 
 | Method | MAE (s) | RMSE (s) | R² |
 |---|---|---|---|
-| Naive Baseline | 6.829 | 15.425 | −0.002 |
-| Linear Regression | 6.856 | 12.940 | 0.295 |
-| Dense NN | 6.942 | 12.443 | **0.348** |
-| LSTM | **6.833** | **12.485** | 0.343 |
+| Naive Baseline | **2.524** | 6.475 | 0.958 |
+| Linear Regression | 3.050 | 6.359 | 0.960 |
+| Dense NN | 2.952 | 5.649 | 0.968 |
+| LSTM | 2.701 | **5.292** | **0.972** |
 
 - **MAE** (Mean Absolute Error): average absolute prediction error.
 - **RMSE** (Root Mean Squared Error): penalises large errors more heavily.
@@ -153,15 +162,15 @@ All features are standardised (zero mean, unit variance) before training.
 
 **Key findings:**
 
-1. **All learned methods substantially outperform the naive baseline** on RMSE (≈19% reduction) and R² (from ≈0 to ≈0.35), demonstrating that past travel time patterns contain useful predictive information beyond just the current value.
+1. **LSTM achieves the best RMSE and R²**, outperforming the naive baseline by 18% on RMSE (5.29 vs 6.47) and achieving R² = 0.972 vs 0.958.  The Dense NN also substantially outperforms the baseline (RMSE 5.65 vs 6.47, R² = 0.968).
 
-2. **The Dense NN and LSTM achieve the best R²** (≈0.35), capturing non-linear dynamics in congestion transitions. The LSTM achieves the best MAE, while the Dense NN achieves the best R².
+2. **The naive baseline has the lowest MAE** (2.52 s) because it is exactly correct whenever travel time does not change between consecutive time-steps — which is the majority of observations during stable conditions.  However, its high RMSE reveals that it makes **large errors during congestion transitions** (onset and dissipation), which is precisely when accurate prediction matters most.
 
-3. **Linear Regression is also effective**, achieving R² = 0.295 with a simple weighted combination of past travel times.
+3. **RMSE is the more informative metric** for this problem because it penalises the large errors during congestion transitions that the naive baseline cannot handle.  The LSTM's 18% RMSE reduction means substantially better predictions during the critical periods.
 
-4. **The naive baseline has R² ≈ 0**, meaning that simply repeating the current travel time explains no more variance than predicting the overall mean. This is because, while the naive approach is perfect during stable free-flow, it fails badly during congestion transitions (onset and offset), which dominate the prediction error.
+4. **Linear Regression** improves over the naive baseline on RMSE and R² but is limited by its inability to capture the non-linear dynamics of queue formation and dissipation.
 
-5. **MAE values are similar** across all methods (≈6.8 s) because the majority of observations are at free-flow where all methods predict similarly. The RMSE and R² differences reveal the important distinction: learned models handle congested conditions significantly better.
+5. **All R² values are very high** (≥ 0.958), reflecting that the corridor-with-bottleneck design produces a wide range of travel times with clear temporal patterns that all methods can leverage.
 
 ### 4.3 Visualisations
 
@@ -173,7 +182,7 @@ All features are standardised (zero mean, unit variance) before training.
 
 ![Scatter plots of predicted vs actual travel times](results/scatter_pred_vs_actual.png)
 
-The diagonal red dashed line represents perfect prediction. Points above the line indicate over-prediction; points below indicate under-prediction. The naive baseline shows a characteristic pattern of repeating the current value, while the learned models provide better-calibrated predictions.
+The diagonal red dashed line represents perfect prediction.  The naive baseline shows a characteristic pattern of echoing the previous value, which works well during stable periods but creates scatter during transitions.  The LSTM and Dense NN produce tighter clustering around the diagonal.
 
 #### Training Loss Curves
 
@@ -185,25 +194,25 @@ Both models converge within the first 20 epochs, with the gap between training a
 
 ![Histogram of travel times in the dataset](results/travel_time_distribution.png)
 
-The distribution shows a dominant peak at the free-flow travel time (36 s) with a meaningful tail representing congested conditions up to 180 s.
+The distribution is bimodal, reflecting the two traffic states in the kinematic wave model: free-flow (≈21.6 s) and queued (≈80–95 s).  The corridor-with-bottleneck design ensures that roughly half the data represents congested conditions.
 
 #### Example Time-Series
 
 ![Example time-series of travel time](results/example_time_series.png)
 
-An example of travel time evolution on a single link during one test scenario, showing the congestion build-up and dissipation pattern created by the Gaussian peak demand.
+An example of travel time evolution on a single link during one test scenario, showing the congestion build-up driven by the bottleneck and its eventual dissipation.
 
 ## 5. Conclusion
 
-This experiment demonstrates short-term travel time prediction using past travel time observations:
+This experiment demonstrates short-term travel time prediction using past travel time observations on a congestion-rich corridor network:
 
-1. **All learned methods outperform the naive baseline** (TT_next = TT_current), particularly on RMSE and R², proving that the prediction problem is non-trivial and that temporal patterns can be exploited.
+1. **The corridor-with-bottleneck network design** resolves the problem of excessive free-flow data that plagued the grid-based approach.  By eliminating alternative routes, the bottleneck creates sustained congestion on upstream links, yielding roughly 50/50 free-flow and congested observations.
 
-2. **Dense NN and LSTM** achieve the best overall performance (R² ≈ 0.35), with LSTM providing the lowest MAE and Dense NN the highest R².
+2. **LSTM and Dense NN outperform the naive baseline** on RMSE (18% and 13% reduction respectively) and R², demonstrating that learned models capture temporal dynamics of congestion transitions that a simple persistence forecast cannot.
 
-3. **Linear Regression** provides a solid middle ground with R² = 0.295, showing that even a simple linear combination of past travel times outperforms the naive approach.
+3. **The naive baseline is competitive on MAE** because it is perfect during stable conditions, but its high RMSE reveals critical failures during congestion onset and dissipation — the periods when accurate forecasts are most valuable.
 
-4. The **Gaussian peak demand pattern** creates realistic congestion dynamics with 24% of records showing meaningful congestion, making the prediction problem substantially more challenging and meaningful than a flat-demand scenario.
+4. The **bimodal travel time distribution** is a physical property of the kinematic wave traffic model, where links transition sharply between free-flow and queued states.
 
 ## Reproducibility
 

@@ -58,7 +58,10 @@ def build_network(W):
             nodes[(c, p)] = W.addNode(
                 name, p * LINK_LENGTH, c * LINK_LENGTH * 3)
 
-    btl_positions = np.random.randint(4, 7, size=NUM_CORRIDORS)
+    # Place bottleneck in the downstream half of each corridor so that
+    # queues propagate upstream through most of the corridor's links.
+    btl_positions = np.random.randint(
+        NODES_PER_CORRIDOR - 4, NODES_PER_CORRIDOR - 1, size=NUM_CORRIDORS)
 
     for c in range(NUM_CORRIDORS):
         for p in range(NODES_PER_CORRIDOR - 1):
@@ -91,6 +94,7 @@ def add_demand(W, nodes, demand_scale):
             elif t_mid < SIM_DURATION * 0.85:
                 time_factor = 1.0
             else:
+                # Keep a small residual flow to avoid empty-network artefacts
                 time_factor = max(0.05, 1.0 - (t_mid - SIM_DURATION * 0.85)
                                   / (SIM_DURATION * 0.15))
             rate = base_rate * time_factor * np.random.uniform(0.8, 1.2)
