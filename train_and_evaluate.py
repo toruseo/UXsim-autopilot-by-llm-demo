@@ -125,6 +125,9 @@ def build_sequences(df, lookback):
             vals = [tt_lookup[(sc, t, n)]
                     for n in nbrs if (sc, t, n) in tt_lookup]
             nbr_mean[idx] = np.mean(vals).astype(np.float32) if vals else tt[idx]
+            # ↑ Fallback to own TT when no neighbour data is available;
+            #   in practice every link in this network has at least one
+            #   neighbour so this path is only a safety guard.
 
         for i in range(lookback, len(tt)):
             own_feat = tt[i - lookback:i]

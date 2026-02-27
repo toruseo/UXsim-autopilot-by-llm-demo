@@ -14,7 +14,7 @@ The prediction task is: **given the travel times of a link and the mean travel t
 
 ## 2. Mathematical Formulation of Methods
 
-Let $\text{TT}_t$ denote the travel time of the target link at time-step $t$, and let $\overline{\text{TT}}^{\text{nbr}}_t$ denote the mean travel time of its network-adjacent neighbours (links sharing at least one node) at time-step $t$.  The input is:
+Let $\text{TT}_t$ denote the travel time of the target link at time-step $t$, and let $\overline{\text{TT}}^{\text{nbr}}_t = \frac{1}{|\mathcal{N}|}\sum_{j \in \mathcal{N}} \text{TT}^{(j)}_t$ denote the arithmetic mean travel time of its network-adjacent neighbours $\mathcal{N}$ (links sharing at least one node) at time-step $t$.  The input is:
 
 $$\mathbf{x}_t = (\text{TT}_{t-L}, \dots, \text{TT}_{t-1},\; \overline{\text{TT}}^{\text{nbr}}_{t-L}, \dots, \overline{\text{TT}}^{\text{nbr}}_{t-1})$$
 
