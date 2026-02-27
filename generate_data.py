@@ -27,6 +27,8 @@ JAM_DENSITY = 0.2           # veh/m
 SIM_DURATION = 7200          # seconds (2 hours, for congestion cycle)
 DEMAND_INTERVAL = 300        # seconds – resolution for demand slicing
 PEAK_FACTOR = 2.0            # peak-to-base demand ratio
+DEMAND_SCALE_MIN = 0.7       # minimum demand scale across scenarios
+DEMAND_SCALE_MAX = 1.0       # maximum demand scale across scenarios
 RECORD_DT = 30               # seconds – sampling interval for records
 OUTPUT_DIR = "data"
 
@@ -153,7 +155,8 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     all_records = []
-    demand_scales = np.random.uniform(0.7, 1.0, size=NUM_SCENARIOS)
+    demand_scales = np.random.uniform(DEMAND_SCALE_MIN, DEMAND_SCALE_MAX,
+                                      size=NUM_SCENARIOS)
 
     for sid in range(NUM_SCENARIOS):
         print(f"Running scenario {sid + 1}/{NUM_SCENARIOS} "

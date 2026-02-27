@@ -109,6 +109,8 @@ def main():
     df = pd.read_csv(DATA_PATH)
     print(f"Loaded {len(df)} records from {DATA_PATH}")
 
+    # All links in the grid have the same length and speed, so free-flow TT
+    # is uniform across the dataset.
     ff_tt = df["free_flow_tt"].iloc[0]
     pct_cong = (df["travel_time"] > ff_tt * 1.1).mean() * 100
     print(f"Free-flow TT: {ff_tt:.1f}s, congested records: {pct_cong:.1f}%")
